@@ -10,16 +10,18 @@ use comfy_table::{modifiers::UTF8_ROUND_CORNERS, Cell, Color, Table};
 use eyre::Result;
 use foundry_block_explorers::contract::Metadata;
 use foundry_compilers::{
-    artifacts::{remappings::Remapping, BytecodeObject, Contract, Source},
+    artifacts::{BytecodeObject, Contract, Remapping, Source},
     compilers::{
         solc::{Solc, SolcCompiler},
         Compiler,
     },
     info::ContractInfo as CompilerContractInfo,
     report::{BasicStdoutReporter, NoReporter, Report},
+    resolc::Resolc,
     solc::SolcSettings,
     Artifact, Project, ProjectBuilder, ProjectCompileOutput, ProjectPathsConfig, SolcConfig,
 };
+use foundry_config::revive::ReviveConfig;
 use num_format::{Locale, ToFormattedString};
 use std::{
     collections::BTreeMap,
@@ -134,6 +136,7 @@ impl ProjectCompiler {
     pub fn compile<C: Compiler<CompilerContract = Contract>>(
         mut self,
         project: &Project<C>,
+        revive_config: &ReviveConfig,
     ) -> Result<ProjectCompileOutput<C>> {
         // TODO: Avoid process::exit
         if !project.paths.has_input_files() && self.files.is_empty() {
@@ -144,6 +147,8 @@ impl ProjectCompiler {
 
         // Taking is fine since we don't need these in `compile_with`.
         let files = std::mem::take(&mut self.files);
+        let quite = self.quiet.unwrap_or(false);
+
         self.compile_with(|| {
             let sources = if !files.is_empty() {
                 Source::read_all(files)?
@@ -151,6 +156,19 @@ impl ProjectCompiler {
                 project.paths.read_input_files()?
             };
 
+            // Show Revive version before compilation starts this helps
+            // Developers know they using revive for compilation
+            if revive_config.revive_compile && (!quite || !shell::is_json()) {
+                let revive_path = revive_config.revive_path.as_ref().ok_or_else(|| {
+                    eyre::eyre!("Revive path is required when compiling with revive")
+                })?;
+
+                let version = Resolc::get_version_for_path(revive_path)?;
+                Report::new(SpinnerReporter::spawn_with(format!(
+                    "Using Revive {}.{}.{}",
+                    version.major, version.minor, version.patch
+                )));
+            }
             foundry_compilers::project::ProjectCompiler::with_sources(project, sources)?
                 .compile()
                 .map_err(Into::into)
@@ -472,8 +490,9 @@ pub fn compile_target<C: Compiler<CompilerContract = Contract>>(
     target_path: &Path,
     project: &Project<C>,
     quiet: bool,
+    revive_config: &ReviveConfig,
 ) -> Result<ProjectCompileOutput<C>> {
-    ProjectCompiler::new().quiet(quiet).files([target_path.into()]).compile(project)
+    ProjectCompiler::new().quiet(quiet).files([target_path.into()]).compile(project, revive_config)
 }
 
 /// Creates a [Project] from an Etherscan source.

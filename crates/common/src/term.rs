@@ -116,11 +116,11 @@ impl SpinnerReporter {
                         Ok(SpinnerMsg::Msg(msg)) => {
                             spinner.message(msg);
                             // new line so past messages are not overwritten
-                            println!();
+                            let _ = sh_println!();
                         }
                         Ok(SpinnerMsg::Shutdown(ack)) => {
                             // end with a newline
-                            println!();
+                            let _ = sh_println!();
                             let _ = ack.send(());
                             break;
                         }
